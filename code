@@ -1,0 +1,39 @@
+from keras.layers import Input, LSTM, Dense, RepeatVector
+from keras.models import Model
+from keras.callbacks import EarlyStopping
+import numpy as np
+
+# Load the data
+X_train = np.load('X_train.npy')
+X_val = np.load('X_val.npy')
+
+# Create the model
+input_layer = Input(shape=(X_train.shape[1], X_train.shape[2]))
+encoder = LSTM(64, activation='relu')(input_layer)
+encoder = Dense(32, activation='relu')(encoder)
+
+decoder = RepeatVector(X_train.shape[1])(encoder)
+decoder = LSTM(64, activation='relu', return_sequences=True)(decoder)
+decoder = Dense(X_train.shape[2], activation='linear')(decoder)
+
+model = Model(input_layer, decoder)
+model.compile(optimizer='adam', loss='mse')
+
+earlystopping = EarlyStopping(monitor='val_loss', patience=5, restore_best_weights=True)
+
+# Train the model
+model.fit(X_train, X_train, epochs=100, batch_size=32, validation_data=(X_val, X_val), callbacks=[earlystopping])
+
+# Prepare the model for anomaly detection
+encoder = Model(input_layer, encoder)
+
+# Compute the reconstruction error on the validation set
+val_error = np.mean(np.power(X_val - encoder.predict(X_val), 2), axis=1)
+
+# Set a threshold for anomaly detection
+threshold = np.percentile(val_error, 95)
+
+# Detect anomalies in new data
+new_data = np.load('new_data.npy')
+new_error = np.mean(np.power(new_data - encoder.predict(new_data), 2), axis=1)
+anomalies = np.where(new_error > threshold)
